@@ -492,8 +492,19 @@ when defineSsl:
       ctx.referencedData.incl(index)
     GC_ref(data)
 
+  proc c_strcpy(a: cstring, b: cstring): cstring {.
+    importc: "strcpy", header: "<string.h>", noSideEffect.}
+
+  var password_gb = ""
+  proc callback(buf: cstring, size, rwflag: cint, password: pointer): cint =
+    discard c_strcpy(buf, (cstring)password_gb)
+    let password_length = (cint)len(buf)
+    if((password_length + 1) > size):
+      return (cint)0
+    result = password_length
+
   # http://simplestcodings.blogspot.co.uk/2010/08/secure-server-client-using-openssl-in-c.html
-  proc loadCertificates(ctx: SSL_CTX, certFile, keyFile: string) =
+  proc loadCertificates(ctx: SSL_CTX, certFile, keyFile: string, password = "") =
     if certFile != "" and not existsFile(certFile):
       raise newException(system.IOError, "Certificate file could not be found: " & certFile)
     if keyFile != "" and not existsFile(keyFile):
@@ -505,6 +516,9 @@ when defineSsl:
         raiseSSLError()
 
     # TODO: Password? www.rtfm.com/openssl-examples/part1.pdf
+    if password != "":
+      password_gb = password
+      SSL_CTX_set_default_passwd_cb(ctx, callback)
     if keyFile != "":
       if SSL_CTX_use_PrivateKey_file(ctx, keyFile,
                                      SSL_FILETYPE_PEM) != 1:
@@ -514,7 +528,7 @@ when defineSsl:
         raiseSSLError("Verification of private key file failed.")
 
   proc newContext*(protVersion = protSSLv23, verifyMode = CVerifyPeer,
-                   certFile = "", keyFile = "", cipherList = "ALL"): SSLContext =
+                   certFile = "", keyFile = "", cipherList = "ALL", password = ""): SSLContext =
     ## Creates an SSL context.
     ##
     ## Protocol version specifies the protocol to use. SSLv2, SSLv3, TLSv1
@@ -552,7 +566,7 @@ when defineSsl:
       raiseSSLError()
 
     discard newCTX.SSLCTXSetMode(SSL_MODE_AUTO_RETRY)
-    newCTX.loadCertificates(certFile, keyFile)
+    newCTX.loadCertificates(certFile, keyFile, password)
 
     result = SSLContext(context: newCTX, referencedData: initSet[int](),
       extraInternal: new(SslContextExtraInternal))
